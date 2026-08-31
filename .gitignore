@@ -1,0 +1,6 @@
+AGENTS.md
+.env
+.env.local
+__pycache__/
+node_modules/
+data/raw/
