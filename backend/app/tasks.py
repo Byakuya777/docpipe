@@ -5,9 +5,12 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
 from app.celery_app import celery_app
 from app.config import settings
-from app.db.models import Document, DocumentStatus, Result
+from app.db.models import Batch, BatchStatus, Document, DocumentStatus, Result
 from app.db.session import SessionLocal
 from app.services.extract import ExtractionError, extract_text
 from app.services.llm import LLMError, analyze_document
@@ -58,10 +61,14 @@ def process_document(self, document_id: str) -> str:
             logger.error("document %s not found; nothing to process", document_id)
             return "missing"
 
+        batch_id = doc.batch_id
+
         # Idempotency (§6.2): a re-delivered task must not re-run the analysis
-        # or overwrite a finished result.
+        # or overwrite a finished result. The batch check still runs — it is
+        # cheap and makes a batch that missed its flip self-healing.
         if doc.status == DocumentStatus.DONE:
             logger.info("document %s already done; skipping", document_id)
+            _finalize_batch(db, batch_id)
             return DocumentStatus.DONE
 
         doc.status = DocumentStatus.PROCESSING
@@ -76,6 +83,7 @@ def process_document(self, document_id: str) -> str:
             # Permanent: a corrupt or image-only file will not fix itself.
             logger.warning("extraction failed for %s: %s", document_id, exc)
             _fail(db, doc, f"extraction failed: {exc}")
+            _finalize_batch(db, batch_id)
             return DocumentStatus.FAILED
         except LLMError as exc:
             attempt = self.request.retries + 1  # retries is 0 on the first run
@@ -92,6 +100,7 @@ def process_document(self, document_id: str) -> str:
                     attempt,
                 )
                 _fail(db, doc, f"llm call failed after {attempt} attempts: {exc}")
+                _finalize_batch(db, batch_id)
                 return DocumentStatus.FAILED
 
             countdown = _backoff_seconds(self.request.retries)
@@ -108,6 +117,7 @@ def process_document(self, document_id: str) -> str:
         except Exception as exc:
             logger.exception("unexpected failure processing %s", document_id)
             _fail(db, doc, f"unexpected error: {type(exc).__name__}: {exc}")
+            _finalize_batch(db, batch_id)
             return DocumentStatus.FAILED
 
         elapsed_ms = (time.perf_counter() - started) * 1000
@@ -130,6 +140,7 @@ def process_document(self, document_id: str) -> str:
         db.commit()
 
         logger.info("document %s done in %.0f ms", document_id, elapsed_ms)
+        _finalize_batch(db, batch_id)
         return DocumentStatus.DONE
 
 
@@ -143,3 +154,45 @@ def _fail(db, doc: Document, message: str) -> None:
     doc.error_message = message[:2000]
     doc.completed_at = datetime.now(timezone.utc)
     db.commit()
+
+
+def _finalize_batch(db: Session, batch_id: uuid.UUID) -> None:
+    """Flip the batch to a terminal status once nothing is left in flight.
+
+    Runs inside every task rather than in a separate polling process (§6.2) —
+    one fewer moving part, and the check happens exactly when it can change.
+
+    The batch row is locked with SELECT ... FOR UPDATE *before* counting, which
+    is what makes this safe when several documents finish at the same instant.
+    Without the lock, two tasks could both count zero remaining and both
+    declare themselves last (§15). The lock serializes them: the first wins and
+    flips the status, the second finds the batch already terminal and returns.
+    """
+    batch = db.execute(
+        select(Batch).where(Batch.id == batch_id).with_for_update()
+    ).scalar_one_or_none()
+
+    if batch is None or batch.status != BatchStatus.PROCESSING:
+        db.commit()  # releases the row lock
+        return
+
+    counts = dict(
+        db.execute(
+            select(Document.status, func.count())
+            .where(Document.batch_id == batch_id)
+            .group_by(Document.status)
+        ).all()
+    )
+    remaining = sum(n for s, n in counts.items() if s not in DocumentStatus.TERMINAL)
+    if remaining:
+        db.commit()
+        return
+
+    failed = counts.get(DocumentStatus.FAILED, 0)
+    total = sum(counts.values())
+    batch.status = BatchStatus.FAILED if failed == total else BatchStatus.COMPLETED
+    db.commit()
+
+    logger.info(
+        "batch %s -> %s (%d of %d documents failed)", batch_id, batch.status, failed, total
+    )

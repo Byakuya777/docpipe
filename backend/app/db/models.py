@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -18,17 +18,57 @@ class DocumentStatus:
     DONE = "done"
     FAILED = "failed"
 
+    TERMINAL = (DONE, FAILED)
 
-class Document(Base):
-    __tablename__ = "document"
 
-    # batch_id arrives in M2 along with the batch table; M1 is one document at
-    # a time, so there is nothing to group yet.
+class BatchStatus:
+    """A batch is terminal once no document is still in flight.
+
+    `failed` means every document failed; a batch where only some failed is
+    `completed` with a non-zero failed_count, since the frontend stops polling
+    on either terminal status (§9) and needs the counts to tell the story.
+    """
+
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class Batch(Base):
+    __tablename__ = "batch"
+
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
         server_default=func.gen_random_uuid(),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    total_documents: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default=BatchStatus.PROCESSING, server_default=BatchStatus.PROCESSING
+    )
+
+    documents: Mapped[list["Document"]] = relationship(
+        back_populates="batch", cascade="all, delete-orphan"
+    )
+
+
+class Document(Base):
+    __tablename__ = "document"
+
+    __table_args__ = (Index("ix_document_batch_id_status", "batch_id", "status"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
+    )
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("batch.id", ondelete="CASCADE"), nullable=False
     )
     filename: Mapped[str] = mapped_column(Text, nullable=False)
     storage_path: Mapped[str] = mapped_column(Text, nullable=False)
@@ -45,6 +85,7 @@ class Document(Base):
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    batch: Mapped[Batch] = relationship(back_populates="documents")
     result: Mapped["Result | None"] = relationship(
         back_populates="document", cascade="all, delete-orphan", uselist=False
     )

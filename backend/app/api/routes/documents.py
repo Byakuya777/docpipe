@@ -1,57 +1,18 @@
 import logging
 import uuid
-from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.db.models import Document, DocumentStatus
+from app.db.models import Document
 from app.db.session import get_db
-from app.storage import save_upload
-from app.tasks import process_document
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
-
-@router.post("", status_code=202)
-def upload_document(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """Accept one PDF, queue it, return immediately.
-
-    This handler never touches the PDF's contents or the LLM — it persists the
-    file, commits the row, and hands off to Celery (§6.3). The 202 says
-    "accepted, not finished": poll GET /api/documents/{id} for the outcome.
-    """
-    filename = file.filename or "upload.pdf"
-    if Path(filename).suffix.lower() != ".pdf":
-        raise HTTPException(status_code=400, detail="only .pdf files are supported in v1")
-
-    document_id = uuid.uuid4()
-    storage_path = save_upload(file.file, document_id, filename)
-
-    doc = Document(
-        id=document_id,
-        filename=filename,
-        storage_path=str(storage_path),
-        status=DocumentStatus.QUEUED,
-    )
-    db.add(doc)
-    # Commit before enqueueing: a worker can pick the task up the instant it is
-    # published, and it must find the row already there.
-    db.commit()
-
-    task = process_document.delay(str(document_id))
-    doc.celery_task_id = task.id
-    db.commit()
-
-    logger.info("queued document %s (%s) as task %s", document_id, filename, task.id)
-    return {
-        "document_id": str(document_id),
-        "filename": filename,
-        "status": doc.status,
-        "task_id": task.id,
-    }
+# Uploading happens through POST /api/batches — a single file is just a batch
+# of one. M1's POST /api/documents was scaffolding toward that and is gone.
 
 
 @router.get("/{document_id}")
@@ -73,6 +34,7 @@ def get_document(document_id: uuid.UUID, db: Session = Depends(get_db)):
 
     return {
         "id": str(doc.id),
+        "batch_id": str(doc.batch_id),
         "filename": doc.filename,
         "status": doc.status,
         "attempt_count": doc.attempt_count,
