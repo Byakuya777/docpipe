@@ -4,3 +4,8 @@ AGENTS.md
 __pycache__/
 node_modules/
 data/raw/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
