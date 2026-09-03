@@ -148,9 +148,45 @@ def _complete(prompt: str) -> str:
     Replace the stub branch with a real client call (and raise LLMError on
     timeout/rate-limit) to go live. Everything above stays as is.
     """
+    _maybe_inject_fault()
+
     if settings.llm_provider == "stub":
         return _stub_complete(prompt)
     raise LLMError(f"llm_provider {settings.llm_provider!r} is not implemented yet")
+
+
+def _maybe_inject_fault() -> None:
+    """Simulate a provider timeout, for exercising the retry path.
+
+    Off unless llm_fault_mode says otherwise, so this is inert in normal runs.
+    It earns its place rather than being test scaffolding: §11 M4 requires
+    mocking an LLM timeout, and faking it here — at the real provider boundary,
+    raising the real exception type — tests the actual retry wiring instead of
+    a mock of it.
+    """
+    mode = settings.llm_fault_mode
+    if mode == "off":
+        return
+
+    if mode == "always":
+        raise LLMError("injected fault: simulated provider timeout")
+
+    if mode == "first_n":
+        # Which attempt this is comes from the running Celery task; retries is
+        # 0 on the first execution. Outside a task there is nothing to count,
+        # so treat it as attempt 0.
+        from celery import current_task
+
+        retries = 0
+        if current_task is not None and current_task.request is not None:
+            retries = current_task.request.retries or 0
+        if retries < settings.llm_fault_attempts:
+            raise LLMError(
+                f"injected fault: simulated provider timeout on attempt {retries + 1}"
+            )
+        return
+
+    raise LLMError(f"unknown llm_fault_mode {mode!r}")
 
 
 def _stub_complete(prompt: str) -> str:

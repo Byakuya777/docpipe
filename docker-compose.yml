@@ -53,6 +53,10 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       DATABASE_URL: postgresql+psycopg://docpipe:docpipe@db:5432/docpipe
+      # Retry-path testing. Off unless set in the shell, e.g.
+      #   LLM_FAULT_MODE=always docker compose up -d worker
+      LLM_FAULT_MODE: ${LLM_FAULT_MODE:-off}
+      LLM_FAULT_ATTEMPTS: ${LLM_FAULT_ATTEMPTS:-2}
     volumes:
       - ./backend/app:/app/app
       - ./data:/app/data

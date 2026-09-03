@@ -23,5 +23,19 @@ class Settings(BaseSettings):
     # Rough guard on prompt size — the analysis prompt truncates past this.
     llm_max_input_chars: int = 12000
 
+    # Retry/backoff for recoverable failures (LLMError). The delay is computed
+    # in tasks.py rather than via Celery's retry_backoff option, which only
+    # applies to autoretry_for and is ignored by a manual self.retry() call.
+    task_max_retries: int = 3
+    retry_backoff_base: float = 2.0
+    retry_backoff_max: float = 60.0
+
+    # Fault injection for testing the retry path (PROJECT_SPEC.md §6.2, §11 M4:
+    # "mock an LLM timeout"). "off" in normal operation.
+    #   always  — every LLM call raises LLMError
+    #   first_n — the first llm_fault_attempts attempts raise, then succeed
+    llm_fault_mode: str = "off"
+    llm_fault_attempts: int = 2
+
 
 settings = Settings()
