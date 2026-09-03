@@ -27,15 +27,19 @@ services:
 
   backend:
     build: ./backend
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    # The API owns schema migration; the worker must not race it.
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     ports:
       - "8000:8000"
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
-      DATABASE_URL: postgresql://docpipe:docpipe@db:5432/docpipe
+      DATABASE_URL: postgresql+psycopg://docpipe:docpipe@db:5432/docpipe
     volumes:
       - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+      # Uploaded files: written by the API, read by the worker.
+      - ./data:/app/data
     depends_on:
       db:
         condition: service_healthy
@@ -48,9 +52,10 @@ services:
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
-      DATABASE_URL: postgresql://docpipe:docpipe@db:5432/docpipe
+      DATABASE_URL: postgresql+psycopg://docpipe:docpipe@db:5432/docpipe
     volumes:
       - ./backend/app:/app/app
+      - ./data:/app/data
     depends_on:
       db:
         condition: service_healthy

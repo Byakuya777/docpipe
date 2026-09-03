@@ -3,7 +3,7 @@ AGENTS.md
 .env.local
 __pycache__/
 node_modules/
-data/raw/
+data/
 .venv/
 *.egg-info/
 dist/
