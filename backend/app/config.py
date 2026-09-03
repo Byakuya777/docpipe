@@ -15,13 +15,25 @@ class Settings(BaseSettings):
     # path has to be the same bind mount in both containers.
     storage_dir: Path = Path("/app/data/uploads")
 
-    # LLM. "stub" is a deterministic fake so the pipeline runs without an API
-    # key; swapping in a real provider means implementing _complete() in
-    # app/services/llm.py and setting llm_provider/llm_model here.
-    llm_provider: str = "stub"
-    llm_model: str = "stub-v0"
+    # LLM. "anthropic" calls the real API; "stub" is the deterministic fake,
+    # kept so the pipeline still runs with no API key and no network.
+    llm_provider: str = "anthropic"
+    llm_model: str = "claude-haiku-4-5"
+    # Read from ANTHROPIC_API_KEY. Left unset, the SDK resolves credentials
+    # from the environment itself.
+    anthropic_api_key: str | None = None
+    # Identity-linked API keys must name the workspace the request acts in;
+    # the API rejects them with a 400 otherwise. Unused by other key types.
+    anthropic_workspace_id: str | None = None
     # Rough guard on prompt size — the analysis prompt truncates past this.
     llm_max_input_chars: int = 12000
+    # The reply is one small JSON object, so this ceiling is deliberately
+    # tight rather than lowballed.
+    llm_max_output_tokens: int = 2048
+    # Fail fast and let Celery own the backoff, rather than have the SDK
+    # silently burn the task's time on its own retry ladder.
+    llm_timeout_seconds: float = 60.0
+    llm_sdk_max_retries: int = 1
 
     # Retry/backoff for recoverable failures (LLMError). The delay is computed
     # in tasks.py rather than via Celery's retry_backoff option, which only

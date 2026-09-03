@@ -13,7 +13,7 @@ from app.config import settings
 from app.db.models import Batch, BatchStatus, Document, DocumentStatus, Result
 from app.db.session import SessionLocal
 from app.services.extract import ExtractionError, extract_text
-from app.services.llm import LLMError, analyze_document
+from app.services.llm import LLMError, LLMPermanentError, analyze_document
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,13 @@ def process_document(self, document_id: str) -> str:
             # Permanent: a corrupt or image-only file will not fix itself.
             logger.warning("extraction failed for %s: %s", document_id, exc)
             _fail(db, doc, f"extraction failed: {exc}")
+            _finalize_batch(db, batch_id)
+            return DocumentStatus.FAILED
+        except LLMPermanentError as exc:
+            # Permanent: a bad key or a rejected request fails identically on
+            # every attempt, so retrying only wastes time and money.
+            logger.error("llm call permanently failed for %s: %s", document_id, exc)
+            _fail(db, doc, f"llm call failed: {exc}")
             _finalize_batch(db, batch_id)
             return DocumentStatus.FAILED
         except LLMError as exc:
