@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { getDocument, type DocumentDetail } from "@/lib/api";
+import { getDocument, isPartialCoverage, type DocumentDetail } from "@/lib/api";
 
 export default function DocumentPage() {
   const params = useParams<{ id: string }>();
@@ -69,8 +69,27 @@ export default function DocumentPage() {
           {doc.result?.token_count != null && (
             <Meta label="tokens" value={String(doc.result.token_count)} />
           )}
+          {doc.result?.total_pages != null && (
+            <Meta
+              label="pages"
+              value={`${doc.result.pages_read ?? "?"} of ${doc.result.total_pages}`}
+            />
+          )}
         </dl>
       </header>
+
+      {isPartialCoverage(doc.result) && (
+        <section className="mt-6 border-l-2 border-signal bg-surface p-4">
+          <h2 className="font-mono text-[11px] uppercase tracking-[0.14em] text-signal">
+            Partial coverage
+          </h2>
+          <p className="mt-2 text-sm">
+            Everything below was drawn from the first {doc.result!.pages_read} of{" "}
+            {doc.result!.total_pages} pages. Long documents are cut off at a fixed
+            amount of text, so later sections were never sent for analysis.
+          </p>
+        </section>
+      )}
 
       {doc.status === "failed" && (
         <section className="mt-8 border-l-2 border-bad bg-surface p-4">

@@ -40,6 +40,16 @@ export interface DocumentResult {
   model: string;
   token_count: number | null;
   processing_ms: number | null;
+  /** How much of the document the analysis saw. Null for results written
+   *  before page coverage was recorded — unknown, not "all of it". */
+  pages_read: number | null;
+  total_pages: number | null;
+}
+
+/** True only when we positively know the analysis missed pages. */
+export function isPartialCoverage(result: DocumentResult | null): boolean {
+  if (!result || result.pages_read == null || result.total_pages == null) return false;
+  return result.pages_read < result.total_pages;
 }
 
 export interface DocumentDetail {

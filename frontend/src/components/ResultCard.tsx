@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { DocumentDetail } from "@/lib/api";
+import { isPartialCoverage, type DocumentDetail } from "@/lib/api";
 
 export function ResultCard({ doc }: { doc: DocumentDetail }) {
   const failed = doc.status === "failed";
@@ -33,6 +33,12 @@ export function ResultCard({ doc }: { doc: DocumentDetail }) {
           {doc.result?.key_fields?.title && (
             <p className="mt-2 truncate text-sm text-muted">
               {doc.result.key_fields.title}
+            </p>
+          )}
+          {isPartialCoverage(doc.result) && (
+            <p className="mt-3 border-l-2 border-signal pl-2 font-mono text-[11px] text-signal">
+              Summarized from the first {doc.result!.pages_read} of{" "}
+              {doc.result!.total_pages} pages
             </p>
           )}
           <p className="mt-3 line-clamp-3 text-sm leading-relaxed">

@@ -103,6 +103,11 @@ class Result(Base):
     model: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int | None] = mapped_column(Integer)
     processing_ms: Mapped[float | None] = mapped_column(Float)
+    # How much of the document the analysis actually saw. pages_read <
+    # total_pages means extraction stopped early and the summary covers only
+    # the opening pages — the UI says so rather than implying full coverage.
+    pages_read: Mapped[int | None] = mapped_column(Integer)
+    total_pages: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

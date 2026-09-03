@@ -30,6 +30,8 @@ def get_document(document_id: uuid.UUID, db: Session = Depends(get_db)):
             "model": doc.result.model,
             "token_count": doc.result.token_count,
             "processing_ms": doc.result.processing_ms,
+            "pages_read": doc.result.pages_read,
+            "total_pages": doc.result.total_pages,
         }
 
     return {

@@ -77,8 +77,8 @@ def process_document(self, document_id: str) -> str:
         db.commit()
 
         try:
-            text = extract_text(Path(doc.storage_path))
-            analysis = analyze_document(text)
+            extraction = extract_text(Path(doc.storage_path))
+            analysis = analyze_document(extraction.text)
         except ExtractionError as exc:
             # Permanent: a corrupt or image-only file will not fix itself.
             logger.warning("extraction failed for %s: %s", document_id, exc)
@@ -140,6 +140,8 @@ def process_document(self, document_id: str) -> str:
                 model=analysis.model,
                 token_count=analysis.token_count,
                 processing_ms=elapsed_ms,
+                pages_read=extraction.pages_read,
+                total_pages=extraction.total_pages,
             )
         )
         doc.status = DocumentStatus.DONE

@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     anthropic_workspace_id: str | None = None
     # Rough guard on prompt size — the analysis prompt truncates past this.
     llm_max_input_chars: int = 12000
+    # Stop pulling pages once extraction has this much text. Everything past
+    # llm_max_input_chars is discarded before the model sees it, so reading a
+    # 600-page PDF to the end just to throw 99% of it away is what pushed the
+    # worker into an OOM kill. Kept above llm_max_input_chars for headroom.
+    extract_max_chars: int = 24000
     # The reply is one small JSON object, so this ceiling is deliberately
     # tight rather than lowballed.
     llm_max_output_tokens: int = 2048
