@@ -1,4 +1,7 @@
 AGENTS.md
+# Next.js regenerates frontend/CLAUDE.md on every `next dev`, and it only
+# contains "@AGENTS.md" — which the pattern above already ignores.
+frontend/CLAUDE.md
 .env
 .env.local
 __pycache__/

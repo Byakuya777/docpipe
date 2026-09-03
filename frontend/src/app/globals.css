@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+/* Drafting-paper ground, slate ink, and one color per job state. The four
+   states carry the palette because in a queue system the state *is* the
+   information. Committed to a single light treatment on purpose — a
+   half-considered dark mode would weaken both. */
+@theme {
+  --color-paper: #edf0f2;
+  --color-surface: #f8fafb;
+  --color-ink: #14212b;
+  --color-muted: #6b7c88;
+  --color-line: #d0d9de;
+
+  --color-queued: #6b7c88;
+  --color-signal: #e07a1f;
+  --color-good: #197a5c;
+  --color-bad: #b23a32;
+
+  --font-display: var(--font-archivo), system-ui, sans-serif;
+  --font-body: var(--font-public-sans), system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Keyboard focus stays visible everywhere. */
+:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+/* A worker slot breathes while it is chewing on a document. */
+@keyframes slot-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.slot-active {
+  animation: slot-breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.card-in {
+  animation: card-in 0.32s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slot-active,
+  .card-in {
+    animation: none;
+  }
+}

@@ -66,5 +66,21 @@ services:
       redis:
         condition: service_healthy
 
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      # next.config.ts proxies /api/* here, so the browser only ever talks to
+      # the Next server and there is no CORS setup anywhere.
+      API_URL: http://backend:8000
+    volumes:
+      # Only source and config are mounted — mounting the whole directory would
+      # shadow the image's node_modules with the host's.
+      - ./frontend/src:/app/src
+      - ./frontend/next.config.ts:/app/next.config.ts
+    depends_on:
+      - backend
+
 volumes:
   db_data:
