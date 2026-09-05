@@ -13,9 +13,17 @@ EXPOSE 3000
 CMD ["npx", "next", "dev", "-H", "0.0.0.0", "-p", "3000"]
 
 FROM deps AS build
+# The rewrite destination in next.config.ts is resolved during `next build` and
+# baked into .next/routes-manifest.json — it is NOT re-read per request. So
+# API_URL must be present at BUILD time, not just at runtime, or the deployed
+# app proxies to localhost and every /api/* call fails with ECONNREFUSED.
+# `next dev` does re-evaluate the config at startup, which is why compose hides
+# this: only the production build is affected.
+# Railway injects service variables into a Dockerfile build only for names
+# declared with ARG, in the stage that needs them.
+ARG API_URL
+ENV API_URL=$API_URL
 COPY . .
-# API_URL is read per request by the rewrite in next.config.ts, not inlined at
-# build time, so the build needs no reachable backend.
 RUN npm run build
 
 # Production: the default (last) stage, which is what Railway builds.
