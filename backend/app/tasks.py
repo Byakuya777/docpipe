@@ -3,7 +3,6 @@ import random
 import time
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -14,6 +13,7 @@ from app.db.models import Batch, BatchStatus, Document, DocumentStatus, Result
 from app.db.session import SessionLocal
 from app.services.extract import ExtractionError, extract_text
 from app.services.llm import LLMError, LLMPermanentError, analyze_document
+from app.storage import StorageError, StorageNotFound, open_document
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +48,12 @@ def process_document(self, document_id: str) -> str:
     (PROJECT_SPEC.md §15).
 
     Failures split two ways:
-      - permanent (ExtractionError): a corrupt PDF stays corrupt, so retrying
-        is pure waste — straight to `failed`.
-      - recoverable (LLMError): timeouts and rate limits often succeed on a
-        second look — retried with backoff, then `failed` once exhausted.
+      - permanent (ExtractionError, LLMPermanentError, StorageNotFound): a
+        corrupt PDF stays corrupt and a missing object stays missing, so
+        retrying is pure waste — straight to `failed`.
+      - recoverable (LLMError, StorageError): timeouts, rate limits, and an
+        object store that was briefly unreachable often succeed on a second
+        look — retried with backoff, then `failed` once exhausted.
     """
     started = time.perf_counter()
 
@@ -77,12 +79,23 @@ def process_document(self, document_id: str) -> str:
         db.commit()
 
         try:
-            extraction = extract_text(Path(doc.storage_path))
+            # The temp file an object-store read downloads to is released
+            # before the LLM call, which is much the longest part of the task —
+            # no reason to hold the disk for the whole of it.
+            with open_document(doc.storage_path) as local_path:
+                extraction = extract_text(local_path)
             analysis = analyze_document(extraction.text)
         except ExtractionError as exc:
             # Permanent: a corrupt or image-only file will not fix itself.
             logger.warning("extraction failed for %s: %s", document_id, exc)
             _fail(db, doc, f"extraction failed: {exc}")
+            _finalize_batch(db, batch_id)
+            return DocumentStatus.FAILED
+        except StorageNotFound as exc:
+            # Permanent: the object is not in the bucket, and no number of
+            # retries will put it there.
+            logger.error("document %s missing from storage: %s", document_id, exc)
+            _fail(db, doc, f"file missing from storage: {exc}")
             _finalize_batch(db, batch_id)
             return DocumentStatus.FAILED
         except LLMPermanentError as exc:
@@ -92,8 +105,9 @@ def process_document(self, document_id: str) -> str:
             _fail(db, doc, f"llm call failed: {exc}")
             _finalize_batch(db, batch_id)
             return DocumentStatus.FAILED
-        except LLMError as exc:
+        except (LLMError, StorageError) as exc:
             attempt = self.request.retries + 1  # retries is 0 on the first run
+            what = "storage" if isinstance(exc, StorageError) else "llm call"
 
             # Check the counter BEFORE calling retry. On the final attempt
             # self.retry(exc=...) re-raises that exception rather than
@@ -102,17 +116,19 @@ def process_document(self, document_id: str) -> str:
             # document would be left stuck at `processing` forever (§15).
             if self.request.retries >= self.max_retries:
                 logger.error(
-                    "llm call failed for %s on attempt %d; retries exhausted",
+                    "%s failed for %s on attempt %d; retries exhausted",
+                    what,
                     document_id,
                     attempt,
                 )
-                _fail(db, doc, f"llm call failed after {attempt} attempts: {exc}")
+                _fail(db, doc, f"{what} failed after {attempt} attempts: {exc}")
                 _finalize_batch(db, batch_id)
                 return DocumentStatus.FAILED
 
             countdown = _backoff_seconds(self.request.retries)
             logger.warning(
-                "llm call failed for %s on attempt %d: %s — retrying in %.1fs",
+                "%s failed for %s on attempt %d: %s — retrying in %.1fs",
+                what,
                 document_id,
                 attempt,
                 exc,

@@ -11,9 +11,28 @@ class Settings(BaseSettings):
     # +psycopg selects the psycopg 3 driver; bare postgresql:// would ask for psycopg2.
     database_url: str = "postgresql+psycopg://docpipe:docpipe@localhost:5432/docpipe"
 
-    # Uploads land here. The API writes them and the worker reads them, so this
-    # path has to be the same bind mount in both containers.
+    # Where uploaded PDFs go. "local" writes to storage_dir, which is only
+    # correct when the API and the worker share a filesystem — true under
+    # docker-compose (both bind-mount ./data), false on Railway, where a volume
+    # attaches to exactly one service. The deploy sets "s3" and points the
+    # credentials below at Cloudflare R2.
+    storage_backend: str = "local"
+
+    # Local backend only. The API writes here and the worker reads, so the path
+    # has to be the same bind mount in both containers.
     storage_dir: Path = Path("/app/data/uploads")
+
+    # S3 backend only. R2's endpoint is
+    # https://<account-id>.r2.cloudflarestorage.com — the bucket is addressed
+    # in the path, not folded into the host as AWS does it.
+    s3_endpoint_url: str | None = None
+    s3_bucket: str | None = None
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: str | None = None
+    # R2 has no regions, but botocore refuses to sign a request without one.
+    # "auto" is what Cloudflare documents.
+    s3_region: str = "auto"
+    s3_prefix: str = "uploads"
 
     # LLM. "anthropic" calls the real API; "stub" is the deterministic fake,
     # kept so the pipeline still runs with no API key and no network.

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Batch, BatchStatus, Document, DocumentStatus
 from app.db.session import get_db
-from app.storage import save_upload
+from app.storage import StorageError, save_upload
 from app.tasks import process_document
 
 logger = logging.getLogger(__name__)
@@ -43,13 +43,26 @@ def create_batch(files: list[UploadFile] = File(...), db: Session = Depends(get_
     for upload in files:
         filename = upload.filename or "upload.pdf"
         document_id = uuid.uuid4()
-        storage_path = save_upload(upload.file, document_id, filename)
+        try:
+            storage_path = save_upload(upload.file, document_id, filename)
+        except StorageError as exc:
+            # Nothing has been committed or queued yet, so closing the session
+            # rolls the batch back with the request — better a clear 503 than
+            # a batch of rows pointing at objects that were never stored.
+            # Files already uploaded earlier in this batch are left behind in
+            # the bucket; at these volumes that is cheaper than a cleanup path
+            # that could itself fail halfway.
+            logger.error("could not store %s: %s", filename, exc)
+            raise HTTPException(
+                status_code=503, detail=f"could not store {filename}: {exc}"
+            ) from exc
+
         documents.append(
             Document(
                 id=document_id,
                 batch_id=batch.id,
                 filename=filename,
-                storage_path=str(storage_path),
+                storage_path=storage_path,
                 status=DocumentStatus.QUEUED,
             )
         )
